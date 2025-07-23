@@ -11,6 +11,8 @@ from sam2.modeling.sam2_base import SAM2Base, NO_OBJ_SCORE
 from sam2.modeling.sam2_utils import get_1d_sine_pe
 from sam2.utils.kalman_filter import KalmanFilter
 
+from tabulate import tabulate
+
 
 class SAM2ObjectTracker(SAM2Base):
     def __init__(self,
@@ -698,11 +700,15 @@ class SAM2ObjectTracker(SAM2Base):
             kf_ious = torch.full((current_vision_feats[0].shape[1],1), float("nan"), device=self.device)
 
         else:
+            torch.cuda.synchronize()
+            start = time.time()
             # fused the visual feature with previous memory features in the memory bank
             pix_feat_with_mem = self.prepare_memory_conditioned_features(current_vision_feats=current_vision_feats[-1:],
                                                                          current_vision_pos_embeds=current_vision_pos_embeds[-1:],
                                                                          feat_sizes=feat_sizes[-1:],
                                                                          )
+            torch.cuda.synchronize()
+            print(f"[TIMING] prepare_memory_conditioned_features took {1000*(time.time() - start):.1f} ms")
 
             # apply SAM-style segmentation head
             # here we might feed previously predicted low-res SAM mask logits into the SAM mask decoder,
@@ -715,12 +721,17 @@ class SAM2ObjectTracker(SAM2Base):
             init_frame = not self.past_frames['short_term'] and not self.past_frames['long_term']
             multimask_output = self._use_multimask(init_frame, point_inputs)
 
-            sam_outputs = self.forward_sam_heads(backbone_features=pix_feat_with_mem,
-                                                 point_inputs=point_inputs,
-                                                 mask_inputs=mask_inputs,
-                                                 high_res_features=high_res_features,
-                                                 multimask_output=multimask_output,
-                                                 )
+            torch.cuda.synchronize()
+            start = time.time()
+            with torch.no_grad():
+                sam_outputs = self.forward_sam_heads(backbone_features=pix_feat_with_mem,
+                                                    point_inputs=point_inputs,
+                                                    mask_inputs=mask_inputs,
+                                                    high_res_features=high_res_features,
+                                                    multimask_output=multimask_output,
+                                                    )
+            torch.cuda.synchronize()
+            print(f"[TIMING] forward_sam_heads took {1000*(time.time() - start):.1f} ms")
 
             _, _, _, low_res_masks, high_res_masks, obj_ptr, object_score_logits, ious, kf_ious = sam_outputs
 
@@ -1038,6 +1049,18 @@ class SAM2ObjectTracker(SAM2Base):
 
         return prediction
 
+    def get_memory_time(self, function, kwags) -> tuple:
+
+        torch.cuda.synchronize()
+        start_time = time.time()
+        before = torch.cuda.memory_allocated()
+
+        output = function(**kwags)
+        torch.cuda.synchronize()
+        time_taken = f'{(time.time() - start_time) * 1000:.1f}'
+        memory_used = f'{(torch.cuda.memory_allocated() - before)/1024**2:.2f}'
+
+        return (output), time_taken, memory_used
 
     @torch.inference_mode()
     def track_all_objects(self, img: Union[np.ndarray, torch.Tensor]) -> Dict:
@@ -1062,36 +1085,57 @@ class SAM2ObjectTracker(SAM2Base):
 
         """
 
-        start_time = time.time()
-
         # Prepare image for inference
+        preprocess_time , preprocess_mem = 0, 0
         if isinstance(img, np.ndarray):
-            img = self.preprocess_image(img=img)
-
-        preprocess_time = time.time() - start_time
-        start_time = time.time()
+            (img), \
+            preprocess_time, \
+            preprocess_mem = self.get_memory_time(self.preprocess_image, {'img' : img})
 
         # Retrieve image features
-        current_vision_feats, current_vision_pos_embeds, feat_sizes = self.get_image_features(img)
+        (current_vision_feats, current_vision_pos_embeds, feat_sizes), \
+        image_embedding_time, \
+        image_embedding_mem = self.get_memory_time(self.get_image_features, {'img' : img})
 
-        image_embedding_time = time.time() - start_time
-        start_time = time.time()
+        # Inference
+        (prediction), \
+        inference_time, \
+        inference_mem = self.get_memory_time(
+            self.inference, 
+            {
+                "current_vision_feats": current_vision_feats,
+                "current_vision_pos_embeds": current_vision_pos_embeds,
+                "feat_sizes": feat_sizes,
+                "point_inputs": None,
+                "mask_inputs": None,
+                "run_mem_encoder": True,
+                "prev_sam_mask_logits": None
+            }
+        )
+        
+        _, \
+        memory_bank_time, \
+        memory_bank_mem = self.get_memory_time(
+            self.update_memory_bank,
+            {'prediction': prediction}
+        )
 
-        prediction = self.inference(current_vision_feats=current_vision_feats,
-                                    current_vision_pos_embeds=current_vision_pos_embeds,
-                                    feat_sizes=feat_sizes,
-                                    point_inputs=None,
-                                    mask_inputs=None,
-                                    run_mem_encoder=True,
-                                    prev_sam_mask_logits=None
-                                    )
+        total_time = str(float(preprocess_time) + float(image_embedding_time) + float(inference_time) + float(memory_bank_time))
+        total_mem = str(float(preprocess_mem) + float(image_embedding_mem) + float(inference_mem) + float(memory_bank_mem))
 
-        inference_time = time.time() - start_time
-        start_time = time.time()
+        table = [
+            ["Preprocess", preprocess_time, preprocess_mem],
+            ["Feature Extraction", image_embedding_time, image_embedding_mem],
+            ["Inference", inference_time, inference_mem],
+            ["Memory Bank",memory_bank_time,memory_bank_mem],
+            ['Total', total_time, total_mem]
+        ]
 
-        self.update_memory_bank(prediction=prediction)
+        headers = ["Function","Time (ms)", "Memory (MB)"]
 
-        memory_bank_time = time.time() - start_time
+        print()
+        print(tabulate(table, headers = headers,tablefmt = "simple_grid"))
+        print()
 
         if self.verbose:
             print(f'SAM2 Tracking: {preprocess_time * 1000:.1f}ms preprocess, '
