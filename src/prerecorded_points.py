@@ -22,6 +22,7 @@ YOLO_CHECKPOINT_FILEPATH = "yolov8x-seg.pt"
 SAM_CHECKPOINT_FILEPATH = "../checkpoints/sam2.1_hiera_tiny.pt"
 SAM_CONFIG_FILEPATH = "./configs/samurai/sam2.1_hiera_t.yaml"
 OUTPUT_PATH = VIDEO_STREAM + "_segmented.mp4"
+SAVE = True
 DEVICE = 'cuda:0'
 
 video_stream = cv2.VideoCapture(VIDEO_STREAM)
@@ -38,8 +39,9 @@ sam = build_sam2_object_tracker(num_objects=NUM_OBJECTS,
                                 verbose=False)
 
 # video writer for output
-fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-out = cv2.VideoWriter(OUTPUT_PATH, fourcc, 30.0, (video_width, video_height))
+if SAVE:
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(OUTPUT_PATH, fourcc, 30.0, (video_width, video_height))
 
 frame_number = 1
 while video_stream.isOpened():
@@ -71,7 +73,8 @@ while video_stream.isOpened():
             # check if the window has been closed
             if cv2.getWindowProperty("Select Object", cv2.WND_PROP_VISIBLE) < 1:
                 video_stream.release()
-                out.release()
+                if SAVE:
+                    out.release()
                 cv2.destroyAllWindows()
                 exit(0)
 
@@ -104,7 +107,9 @@ while video_stream.isOpened():
     # Visualise and save frame
     start = time.time()
     processed_frame = visualiser.add_frame(frame=frame, mask=sam_out['pred_masks'])
-    out.write(processed_frame)
+
+    if SAVE:
+        out.write(processed_frame)
 
     cv2.imshow("Frame", processed_frame)
 
@@ -118,5 +123,6 @@ while video_stream.isOpened():
     print('\n-------------------------------------------------------------\n')
 
 # save
-out.release()
+if SAVE:
+    out.release()
 cv2.destroyAllWindows()
