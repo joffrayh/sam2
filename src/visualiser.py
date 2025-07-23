@@ -1,5 +1,6 @@
 import torch
 import cv2 as cv
+import numpy as np
 
 class Visualiser:
     '''
@@ -25,8 +26,14 @@ class Visualiser:
         mask = self.resize_mask(mask=mask)
         mask = (mask > 0.0).numpy()
 
+        alpha = 0.5
+        pink = np.array([255, 105, 180])
+
         for i in range(mask.shape[0]):
             obj_mask = mask[i, 0, :, :]
-            frame[obj_mask] = [255, 105, 180]
+            # add the alpha blended mask to the frame
+            frame[obj_mask] = (
+                pink * alpha + frame[obj_mask] * (1 - alpha)
+            ).astype(np.uint8)
         
         return frame
