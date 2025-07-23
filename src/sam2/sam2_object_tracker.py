@@ -951,7 +951,7 @@ class SAM2ObjectTracker(SAM2Base):
                 # Single point (k, 2)
                 point = point[None]  # Add batch dimension -> (1, k, 2)
 
-            label = torch.tensor([1], device=self.device, dtype=torch.int32).unsqueeze(0).repeat(points.shape[0], 1)
+            label = torch.ones((point.shape[0], point.shape[1]), device=self.device, dtype=torch.int32)
 
         point = point.to(device=self.device, dtype=torch.float32, non_blocking=True)
 
