@@ -1,35 +1,10 @@
+import time
 import cv2
 import numpy as np
 import torch
 from sam2.build_sam import build_sam2_object_tracker
 
-
-class Visualizer:
-    def __init__(self, video_width, video_height):
-        self.video_width = video_width
-        self.video_height = video_height
-
-    def resize_mask(self, mask):
-        # mask = torch.tensor(mask, device='cpu')
-        mask = mask.cpu()
-        mask = torch.nn.functional.interpolate(mask,
-                                               size=(self.video_height, self.video_width),
-                                               mode="bilinear",
-                                               align_corners=False)
-        return mask
-
-    def add_frame(self, frame, mask):
-        frame = frame.copy()
-        frame = cv2.resize(frame, (self.video_width, self.video_height))
-        
-        mask = self.resize_mask(mask=mask)
-        mask = (mask > 0.0).numpy()
-
-        for i in range(mask.shape[0]):
-            obj_mask = mask[i, 0, :, :]
-            frame[obj_mask] = [255, 105, 180]  # Color the object region
-        
-        return frame  # Return the modified frame to show/save later
+from visualiser import Visualiser
 
 
 drawing = False
@@ -66,7 +41,7 @@ video_stream = cv2.VideoCapture(VIDEO_STREAM)
 video_height = int(video_stream.get(cv2.CAP_PROP_FRAME_HEIGHT))
 video_width = int(video_stream.get(cv2.CAP_PROP_FRAME_WIDTH))
 
-visualizer = Visualizer(video_width=video_width, video_height=video_height)
+visualiser = Visualiser(video_width=video_width, video_height=video_height)
 
 sam = build_sam2_object_tracker(num_objects=NUM_OBJECTS,
                                 config_file=SAM_CONFIG_FILEPATH,
@@ -117,21 +92,22 @@ while video_stream.isOpened():
     allocated = torch.cuda.memory_allocated() / 1024**2
     reserved = torch.cuda.memory_reserved() / 1024**2
     print(f"[GPU] Allocated: {allocated:.1f} MB | Reserved: {reserved:.1f} MB")
-    print('\n-------------------------------------------------------------\n')
 
-    # visualize and save frame
-    processed_frame = visualizer.add_frame(frame=frame, mask=sam_out['pred_masks'])
+    # Visualise and save frame
+    start = time.time()
+    processed_frame = visualiser.add_frame(frame=frame, mask=sam_out['pred_masks'])
     out.write(processed_frame)
 
     cv2.imshow("Frame", processed_frame)
 
     frame_number+=1
-
     torch.cuda.empty_cache()
 
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
+
+    print('\n-------------------------------------------------------------\n')
 
 # save
 out.release()
