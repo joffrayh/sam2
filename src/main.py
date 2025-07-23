@@ -56,7 +56,7 @@ def draw_rectangle(event, x, y, flags, param):
 VIDEO_STREAM = './juggle.mp4'
 NUM_OBJECTS = 1
 YOLO_CHECKPOINT_FILEPATH = "yolov8x-seg.pt"
-SAM_CHECKPOINT_FILEPATH = "../sam2_realtime/checkpoints/sam2.1_hiera_tiny.pt"
+SAM_CHECKPOINT_FILEPATH = "../checkpoints/sam2.1_hiera_tiny.pt"
 SAM_CONFIG_FILEPATH = "./configs/samurai/sam2.1_hiera_t.yaml"
 OUTPUT_PATH = VIDEO_STREAM + "_segmented.mp4"
 DEVICE = 'cuda:0'
