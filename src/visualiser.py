@@ -1,15 +1,18 @@
 import torch
 import cv2 as cv
 import numpy as np
+from matplotlib import colormaps as cm
 
 class Visualiser:
     '''
     - resizes mask and frame
     - overlays mask on frame
     '''
-    def __init__(self, video_width, video_height):
+    def __init__(self, video_width, video_height, alpha=0.5, colormap='viridis'):
         self.video_width = video_width
         self.video_height = video_height
+        self.alpha = alpha
+        self.colormap = cm.get_cmap(colormap)
 
     def resize_mask(self, mask):
         mask = mask.cpu()
@@ -26,14 +29,13 @@ class Visualiser:
         mask = self.resize_mask(mask=mask)
         mask = (mask > 0.0).numpy()
 
-        alpha = 0.5
-        pink = np.array([255, 105, 180])
+        colors = self.colormap(np.linspace(0, 1, mask.shape[0]), bytes=True)[:, :3]
 
-        for i in range(mask.shape[0]):
+        for i, color in zip(range(mask.shape[0]), colors):
             obj_mask = mask[i, 0, :, :]
             # add the alpha blended mask to the frame
             frame[obj_mask] = (
-                pink * alpha + frame[obj_mask] * (1 - alpha)
+                color * self.alpha + frame[obj_mask] * (1 - self.alpha)
             ).astype(np.uint8)
         
         return frame
